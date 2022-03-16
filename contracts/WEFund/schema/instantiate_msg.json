@@ -1,0 +1,43 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "InstantiateMsg",
+  "type": "object",
+  "properties": {
+    "admin": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "anchor_market": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "aust_token": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "fundraising_contract": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "vesting_contract": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "wefund": {
+      "type": [
+        "string",
+        "null"
+      ]
+    }
+  }
+}
