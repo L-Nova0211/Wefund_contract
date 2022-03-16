@@ -9,27 +9,49 @@ use cw2::set_contract_version;
 use cw20::{Cw20ExecuteMsg, Cw20QueryMsg, BalanceResponse as Cw20BalanceResponse, TokenInfoResponse};
 
 use crate::error::ContractError;
-use crate::msg::{ExecuteMsg, InstantiateMsg, ProjectInfo, UserInfo, VestingParameter, Config};
-use crate::state::{PROJECT_INFOS, OWNER};
+use crate::msg::{ExecuteMsg, InstantiateMsg, UserInfo, CardInfo, CardType};
+use crate::state::{USER_INFOS, CARD_INFOS, OWNER, REWARD_TOKEN, START_TIME, 
+    PLATIUM_CARD_NUMBER, GOLD_CARD_NUMBER, SILVER_CARD_NUMBER, BRONZE_CARD_NUMBER};
+use crate::util::{check_onlyowner, get_cardtype, manage_card, get_reward,
+        update_userinfo, get_token_balance};
+
+const WFD_TOKEN: &str = "terra1pkytkcanua4uazlpekve7qyhg2c5xwwjr4429d";
 
 // version info for migration info
-const CONTRACT_NAME: &str = "Vesting";
+const CONTRACT_NAME: &str = "Staking";
 const CONTRACT_VERSION: &str = env!("CARGO_PKG_VERSION");
 
 #[cfg_attr(not(feature = "library"), entry_point)]
 pub fn instantiate(
     deps: DepsMut,
-    _env: Env,
+    env: Env,
     info: MessageInfo,
     msg: InstantiateMsg,
 ) -> Result<Response, ContractError> {
     set_contract_version(deps.storage, CONTRACT_NAME, CONTRACT_VERSION)?;
 
     let owner = msg
-        .admin
+        .owner
         .and_then(|s| deps.api.addr_validate(s.as_str()).ok()) 
         .unwrap_or(info.sender.clone());
     OWNER.save(deps.storage, &owner)?;
+
+    let reward_token = msg
+        .reward_token
+        .and_then(|s| deps.api.addr_validate(s.as_str()).ok()) 
+        .unwrap_or(Addr::unchecked(WFD_TOKEN));
+    REWARD_TOKEN.save(deps.storage, &reward_token)?;
+
+    let start_time = match msg.start_time{
+        Some(time) => time,
+        None => Uint128::from(env.block.time.seconds())
+    };
+    START_TIME.save(deps.storage, &start_time)?;
+
+    PLATIUM_CARD_NUMBER.save(deps.storage, &Uint128::zero())?;
+    GOLD_CARD_NUMBER.save(deps.storage, &Uint128::zero())?;
+    SILVER_CARD_NUMBER.save(deps.storage, &Uint128::zero())?;
+    BRONZE_CARD_NUMBER.save(deps.storage, &Uint128::zero())?;
 
     Ok(Response::new()
         .add_attribute("method", "instantiate"))
@@ -38,305 +60,188 @@ pub fn instantiate(
 #[cfg_attr(not(feature = "library"), entry_point)]
 pub fn execute(
     deps: DepsMut,
-    _env: Env,
+    env: Env,
     info: MessageInfo,
     msg: ExecuteMsg,
 ) -> Result<Response, ContractError> {
     match msg {
-        ExecuteMsg::SetConfig{ admin }
-            => try_setconfig(deps, info, admin),
+        ExecuteMsg::SetConfig{ owner, start_time, reward_token}
+            => try_setconfig(deps, info, owner, start_time, reward_token),
 
-        ExecuteMsg::StartRelease{ project_id, start_time }
-            => try_startrelease(deps, info, project_id, start_time),
+        ExecuteMsg::Deposit { wallet, amount }
+            => try_deposit(deps, env, info, wallet, amount),
+        
+        ExecuteMsg::Withdraw { wallet, amount }
+            => try_withdraw(deps, env, info, wallet, amount),
 
-        ExecuteMsg::AddProject{ project_id, admin, token_addr, vesting_params, start_time }
-            => try_addproject(deps, info, project_id, admin, token_addr, vesting_params, start_time ),
-
-        ExecuteMsg::SetProjectInfo{ project_id, project_info }
-            => try_setprojectinfo(deps, info, project_id, project_info ),
-
-        ExecuteMsg::SetProjectConfig{ project_id, admin, token_addr , start_time} 
-            => try_setprojectconfig(deps, info, project_id, admin, token_addr, start_time),
-
-        ExecuteMsg::SetVestingParameters{ project_id, params }
-            => try_setvestingparameters(deps, info, project_id, params),
-
-        ExecuteMsg::SetUsers { project_id, stage, user_infos } 
-            =>  try_setusers(deps, info, project_id, stage, user_infos),
-
-        ExecuteMsg::AddUser { project_id, stage, wallet, amount } 
-            =>  try_adduser(deps, info, project_id, stage, wallet, amount),
-
-        ExecuteMsg::ClaimPendingTokens { project_id, }
-            =>  try_claimpendingtokens(deps, _env, info, project_id )
+        ExecuteMsg::ClaimRewards { wallet }
+            => try_claimrewards(deps, env, info, wallet)
     }
 }
 
-pub fn try_startrelease(deps: DepsMut, info:MessageInfo, project_id: Uint128, start_time: Uint128)
-    ->Result<Response, ContractError>
-{
-    let mut x = PROJECT_INFOS.load(deps.storage, project_id.u128().into())?;
-    let owner = OWNER.load(deps.storage).unwrap();
-    if info.sender != owner && info.sender != x.config.owner {
-        return Err(ContractError::Unauthorized{ });
-    }
-
-    x.config.start_time = start_time;
-    PROJECT_INFOS.save(deps.storage, project_id.u128().into(), &x)?;
-    Ok(Response::new()
-    .add_attribute("action", "Start Release"))  
-}
-
-pub fn try_setprojectinfo(deps: DepsMut, info: MessageInfo, project_id: Uint128, project_info: ProjectInfo)
-    ->Result<Response, ContractError>
-{
-    let mut x = PROJECT_INFOS.load(deps.storage, project_id.u128().into())?;
-    let owner = OWNER.load(deps.storage).unwrap();
-    if info.sender != owner && info.sender != x.config.owner {
-        return Err(ContractError::Unauthorized{ });
-    }
-
-    x = project_info;
-    PROJECT_INFOS.save(deps.storage, project_id.u128().into(), &x)?;
-    Ok(Response::new()
-    .add_attribute("action", "set Project Info"))    
-}
-pub fn try_setvestingparameters(deps: DepsMut, info: MessageInfo, project_id: Uint128, params: Vec<VestingParameter>)
-    ->Result<Response, ContractError>
-{
-    let mut x = PROJECT_INFOS.load(deps.storage, project_id.u128().into())?;
-    let owner = OWNER.load(deps.storage).unwrap();
-    if info.sender != owner && info.sender != x.config.owner {
-        return Err(ContractError::Unauthorized{ });
-    }
-
-    x.vest_param = params;
-
-    PROJECT_INFOS.save(deps.storage, project_id.u128().into(), &x)?;
-    Ok(Response::new()
-    .add_attribute("action", "Set Vesting parameters"))
-}
-
-pub fn calc_pending(store: &dyn Storage, _env: Env, project_id: Uint128, user: UserInfo, stage: usize)
-    -> Uint128
-{
-    let x = PROJECT_INFOS.load(store, project_id.u128().into()).unwrap();
-    if x.config.start_time == Uint128::zero() {
-        return Uint128::zero();
-    }
-
-    let param = x.vest_param[stage];
-
-    let past_time = Uint128::new(_env.block.time.seconds() as u128) - x.config.start_time;
-
-    let mut unlocked = Uint128::zero();
-    if past_time > Uint128::zero() {
-        unlocked = user.total_amount * param.soon / Uint128::new(100);
-    }
-    let locked = user.total_amount - unlocked;
-    if past_time > param.after {
-        unlocked += (past_time - param.after) * locked / param.period;
-        if unlocked >= user.total_amount{
-            unlocked = user.total_amount;
-        }
-    }
-
-    return unlocked - user.released_amount;
-}
-
-pub fn try_claimpendingtokens(deps: DepsMut, _env: Env, info: MessageInfo, project_id: Uint128 )
-    ->Result<Response, ContractError>
-{
-    let mut x = PROJECT_INFOS.load(deps.storage, project_id.u128().into())?;
-    let mut amount = Uint128::zero();
-    for i in 0..x.users.len()-1{
-        let index = x.users[i].iter().position(|x| x.wallet_address == info.sender);
-        if index != None {
-            let pending_amount = calc_pending(
-                deps.storage, _env.clone(), project_id, x.users[i][index.unwrap()].clone(), i
-            );
-            x.users[i][index.unwrap()].released_amount += pending_amount;
-            amount += pending_amount;
-        }
-    }
-
-    if amount == Uint128::zero() {
-        return Err(ContractError::NoPendingTokens{});
-    }
-
-    PROJECT_INFOS.save(deps.storage, project_id.u128().into(), &x)?;
-
-    let token_info: TokenInfoResponse = deps.querier.query_wasm_smart(
-        x.config.token_addr.clone(),
-        &Cw20QueryMsg::TokenInfo{}
-    )?;
-    amount = amount * Uint128::new((10 as u128).pow(token_info.decimals as u32)); //for decimals
-
-    let token_balance: Cw20BalanceResponse = deps.querier.query_wasm_smart(
-        x.config.token_addr.clone(),
-        &Cw20QueryMsg::Balance{
-            address: _env.contract.address.to_string(),
-        }
-    )?;
-    if token_balance.balance < amount {
-        return Err(ContractError::NotEnoughBalance{})
-    }
-
-    let bank_cw20 = WasmMsg::Execute {
-        contract_addr: String::from(x.config.token_addr),
-        msg: to_binary(&Cw20ExecuteMsg::Transfer {
-            recipient: info.sender.to_string(),
-            amount: amount,
-        }).unwrap(),
-        funds: Vec::new()
-    };
-
-    Ok(Response::new()
-    .add_message(CosmosMsg::Wasm(bank_cw20))
-    .add_attribute("action", "Claim pending tokens"))
-}
-
-pub fn check_add_userinfo( users: &mut Vec<UserInfo>, wallet:Addr, amount: Uint128)
-{
-    let index =users.iter().position(|x| x.wallet_address == wallet);
-    if index == None {
-        users.push(UserInfo { 
-            wallet_address: wallet, 
-            total_amount: amount, 
-            released_amount: Uint128::zero(), 
-            pending_amount: Uint128::zero() 
-        });
-    }
-    else{
-        users[index.unwrap()].total_amount += amount;
-    }
-}
-pub fn try_adduser(deps: DepsMut, info: MessageInfo, project_id: Uint128, stage:Uint128, wallet:Addr, amount: Uint128)
-    ->Result<Response, ContractError>
-{
-    let mut x = PROJECT_INFOS.load(deps.storage, project_id.u128().into())?;
-    let owner = OWNER.load(deps.storage).unwrap();
-    if info.sender != owner && info.sender != x.config.owner {
-        return Err(ContractError::Unauthorized{ });
-    }
-
-    check_add_userinfo(&mut x.users[stage.u128() as usize], wallet, amount);
-    PROJECT_INFOS.save(deps.storage, project_id.u128().into(), &x)?;
-
-    Ok(Response::new()
-    .add_attribute("action", "Add  User info"))
-}
-
-pub fn try_setusers(deps: DepsMut, info: MessageInfo, project_id: Uint128, stage:Uint128, user_infos: Vec<UserInfo>)
-    ->Result<Response, ContractError>
-{
-    let mut x = PROJECT_INFOS.load(deps.storage, project_id.u128().into())?;
-    let owner = OWNER.load(deps.storage).unwrap();
-    if info.sender != owner && info.sender != x.config.owner {
-        return Err(ContractError::Unauthorized{ });
-    }
-
-    x.users[stage.u128() as usize] = user_infos;
-
-    PROJECT_INFOS.save(deps.storage, project_id.u128().into(), &x)?;
-
-    Ok(Response::new()
-    .add_attribute("action", "Set User infos for Seed stage"))
-}
-
-pub fn try_setprojectconfig(deps:DepsMut, info:MessageInfo,
-    project_id: Uint128,
-    admin: String, 
-    token_addr: String,
-    start_time: Uint128
-) -> Result<Response, ContractError>
-{
-    //-----------check owner--------------------------
-    let mut x = PROJECT_INFOS.load(deps.storage, project_id.u128().into())?;
-    let owner = OWNER.load(deps.storage).unwrap();
-    if info.sender != owner && info.sender != x.config.owner {
-        return Err(ContractError::Unauthorized{ });
-    }
-
-    x.config.owner = deps.api.addr_validate(admin.as_str())?;
-    x.config.token_addr = token_addr;
-    x.config.start_time = start_time;
-
-    PROJECT_INFOS.save(deps.storage, project_id.u128().into(), &x)?;
-    Ok(Response::new()
-        .add_attribute("action", "SetConfig"))                                
-}
-
-pub fn try_addproject(deps:DepsMut, info:MessageInfo,
-    project_id: Uint128,
-    admin: String, 
-    token_addr: String,
-    vesting_params: Vec<VestingParameter>,
-    start_time: Uint128
-) -> Result<Response, ContractError>
-{
-    //-----------check owner--------------------------
-    let owner = OWNER.load(deps.storage).unwrap();
-    if info.sender != owner {
-        return Err(ContractError::Unauthorized{});
-    }
-
-    let config: Config = Config{
-        owner: deps.api.addr_validate(admin.as_str())?,
-        token_addr : token_addr,
-        start_time : start_time,
-    };
-
-    let mut _vesting_params = vesting_params;
-    if _vesting_params.len() == 0{
-        let sec_per_month = 60 * 60 * 24 * 30;
-        let seed_param = VestingParameter {
-            soon: Uint128::new(15), //15% unlock at tge
-            after: Uint128::new(sec_per_month), //after 1 month
-            period: Uint128::new(sec_per_month * 6) //release over 6 month
-        };
-        let presale_param = VestingParameter {
-            soon: Uint128::new(20), //20% unlock at tge
-            after: Uint128::new(sec_per_month), //ater 1 month
-            period: Uint128::new(sec_per_month * 5) //release over 5 month
-        };
-        let ido_param = VestingParameter {
-            soon: Uint128::new(25), //25% unlock at tge
-            after: Uint128::new(sec_per_month), //after 1 month
-            period: Uint128::new(sec_per_month * 4) //release over 4 month
-        };
-        _vesting_params = vec![seed_param, presale_param, ido_param];
-    }
-
-    let mut users = Vec::new();
-    for _ in _vesting_params.clone(){
-        users.push(Vec::new());
-    }
-
-    let project_info: ProjectInfo = ProjectInfo{
-        project_id: project_id,
-        config: config,
-        vest_param: _vesting_params,
-        users: users,
-    };
-
-    PROJECT_INFOS.save(deps.storage, project_id.u128().into(), &project_info)?;
-
-    Ok(Response::new()
-        .add_attribute("action", "add project"))                                
-}
-pub fn try_setconfig(deps:DepsMut, info:MessageInfo, admin: String) 
+pub fn try_setconfig(
+    deps:DepsMut, 
+    info:MessageInfo, 
+    _owner: Option<Addr>,
+    _start_time: Option<Uint128>,
+    _reward_token: Option<Addr>
+)
     -> Result<Response, ContractError>
 {
-    // //-----------check owner--------------------------
-    // let owner = OWNER.load(deps.storage).unwrap();
-    // if info.sender != owner {
-    //     return Err(ContractError::Unauthorized{});
-    // }
+    check_onlyowner(deps.storage, info.sender.clone())?;
 
-    let admin_addr = deps.api.addr_validate(&admin).unwrap();
-    OWNER.save(deps.storage, &admin_addr)?;
+    let mut owner = OWNER.load(deps.storage)?;
+    owner = match _owner{
+        Some(admin) => admin,
+        None => owner
+    };
+    OWNER.save(deps.storage, &owner)?;
+
+    let mut start_time = START_TIME.load(deps.storage)?;
+    start_time = match _start_time{
+        Some(time) => time,
+        None => start_time
+    };
+    START_TIME.save(deps.storage, &start_time)?;
+
+    let mut reward_token = REWARD_TOKEN.load(deps.storage)?;
+    reward_token = match _reward_token{
+        Some(token) => token,
+        None => reward_token
+    };
+    REWARD_TOKEN.save(deps.storage, &reward_token)?;
 
     Ok(Response::new()
         .add_attribute("action", "SetConfig"))                                
+}
+
+pub fn try_deposit(
+    deps: DepsMut,
+    env: Env,
+    info: MessageInfo,
+    wallet: Addr,
+    amount: Uint128
+)
+    -> Result<Response, ContractError>
+{
+    let res = USER_INFOS.may_load(deps.storage, wallet.clone())?;
+    let mut user_info = match res{
+        Some(info) => {
+            update_userinfo(deps.storage, env.clone(), wallet.clone())?;
+
+            let mut info = USER_INFOS.load(deps.storage, wallet.clone())?;
+            info.amount += amount;
+            info
+        },
+        None => UserInfo{
+            wallet: wallet.clone(),
+            amount: amount,
+            last_withdraw_time: Uint128::from(env.block.time.seconds() as u128),
+            reward_amount: Uint128::zero(),
+            last_reward_time: Uint128::from(env.block.time.seconds() as u128),
+            card_type: CardType::Other,
+            card_number: Uint128::zero()
+        }
+    };
+
+    let card_type = get_cardtype(deps.storage, user_info.amount)?;
+    user_info.card_number = manage_card(
+        deps.storage, 
+        wallet.clone(),
+        user_info.card_type, 
+        user_info.card_number, 
+        card_type.clone()
+    )?;
+    user_info.card_type = card_type.clone();
+
+    USER_INFOS.save(deps.storage, wallet, &user_info)?;
+    Ok(Response::new()
+        .add_attribute("action", "desposit"))
+}
+
+pub fn try_withdraw(
+    deps: DepsMut,
+    env: Env,
+    info: MessageInfo,
+    wallet: Addr,
+    amount: Uint128
+)
+    -> Result<Response, ContractError>
+{
+    let mut user_info = USER_INFOS.load(deps.storage, wallet.clone())?;
+    if user_info.amount < amount {
+        return Err(ContractError::NotEnoughBalance {  });
+    }
+    update_userinfo(deps.storage, env.clone(), wallet.clone())?;
+
+    let token = REWARD_TOKEN.load(deps.storage)?;
+    let balance = get_token_balance(&deps.querier, token.clone(), env.contract.address)?;
+    if balance < amount {
+        return Err(ContractError::NotEnoughBalance {  });
+    }
+
+    user_info.amount -= amount;
+    let card_type = get_cardtype(deps.storage, user_info.amount)?;
+    user_info.card_number = manage_card(
+        deps.storage, 
+        wallet.clone(),
+        user_info.card_type, 
+        user_info.card_number, 
+        card_type.clone()
+    )?;
+    user_info.card_type = card_type.clone();
+    user_info.last_withdraw_time = Uint128::from(env.block.time.seconds() as u128);
+    USER_INFOS.save(deps.storage, wallet.clone(), &user_info)?;
+
+    let msg = WasmMsg::Execute { 
+        contract_addr: token.to_string(), 
+        msg: to_binary(
+            &Cw20ExecuteMsg::Transfer { 
+                recipient: wallet.to_string(), 
+                amount: user_info.reward_amount
+            }
+        )?, 
+        funds: vec![]
+    };
+    Ok(Response::new()
+        .add_attribute("action", "withdraw")
+        .add_message(msg)
+    )
+}
+
+pub fn try_claimrewards(
+    deps: DepsMut,
+    env: Env,
+    info: MessageInfo,
+    wallet: Addr,
+)
+    -> Result<Response, ContractError>
+{
+    update_userinfo(deps.storage, env.clone(), wallet.clone())?;
+
+    let mut user_info = USER_INFOS.load(deps.storage, wallet.clone())?;
+    let token = REWARD_TOKEN.load(deps.storage)?;
+    let balance = get_token_balance(&deps.querier, token.clone(), env.contract.address)?;
+
+    if balance < user_info.reward_amount {
+        return Err(ContractError::NotEnoughBalance {  });
+    }
+
+    let msg = WasmMsg::Execute { 
+        contract_addr: token.to_string(), 
+        msg: to_binary(
+            &Cw20ExecuteMsg::Transfer { 
+                recipient: wallet.to_string(), 
+                amount: user_info.reward_amount
+            }
+        )?, 
+        funds: vec![]
+    };
+    user_info.reward_amount = Uint128::zero();
+
+    USER_INFOS.save(deps.storage, wallet, &user_info)?;
+    Ok(Response::new()
+        .add_attribute("action", "claim rewards")
+        .add_message(msg)
+    )
 }

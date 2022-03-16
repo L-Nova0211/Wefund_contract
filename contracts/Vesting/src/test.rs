@@ -28,7 +28,7 @@ fn workflow(){
         project_id: Uint128::from(1u64),
         admin: String::from("admin"),
         token_addr: String::from("WeFund"),
-        vest_param: Vec::new(),
+        vesting_params: Vec::new(),
         start_time: Uint128::from(1645771274u128)
     };
     // let msg = ExecuteMsg::AddSeedUser{

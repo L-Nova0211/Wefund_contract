@@ -22,7 +22,6 @@ fn workflow(){
         wefund: Some(String::from("Wefund")),
         anchor_market: Some( "market".to_string()),
         aust_token: Some("aust".to_string()),
-        fundraising_contract: Some("fundrasing".to_string()),
         vesting_contract: Some("vesting".to_string())
     };
 //instantiate
@@ -117,7 +116,6 @@ fn workflow(){
         let info = mock_info("admin", &[]);
         let msg = ExecuteMsg::WefundApprove{
             project_id: Uint128::new(1),
-            deadline: Uint128::from(mock_env().block.time.seconds())
         };
         let res = execute(deps.as_mut(), mock_env(), info.clone(), msg).unwrap();
         println!("WeFund Approve: {:?}", res);
@@ -130,14 +128,6 @@ fn workflow(){
         // let res = execute(deps.as_mut(), mock_env(), info.clone(), msg).unwrap();
         // println!("WeFund Approve: {:?}", res);
 // //Set community vote
-        let info = mock_info("community1", &[]);
-        let msg = ExecuteMsg::SetCommunityVote{
-            project_id: Uint128::new(1),
-            wallet: String::from("community1"),
-            voted: true
-        };
-        let res = execute(deps.as_mut(), mock_env(), info.clone(), msg).unwrap();
-        println!("Set Community vote: {:?}", res);
 
         // let info = mock_info("community2", &[]);
         // let msg = ExecuteMsg::SetCommunityVote{
@@ -154,7 +144,7 @@ fn workflow(){
             backer_wallet: String::from("backer1"),
             otherchain: "ethereum".to_string(),
             otherchain_wallet: "ether_wallet".to_string(),
-            fundraising_stage: "seed".to_string(),
+            fundraising_stage: Uint128::zero(),
             token_amount: Uint128::new(10)
         };
         let res = execute(deps.as_mut(), mock_env(), info.clone(), msg).unwrap();
@@ -166,7 +156,7 @@ fn workflow(){
             backer_wallet: String::from("backer2"),
             otherchain: "ethereum".to_string(),
             otherchain_wallet: "ether_wallet".to_string(),
-            fundraising_stage: "seed".to_string(),
+            fundraising_stage: Uint128::zero(),
             token_amount: Uint128::new(10)
         };
         let res = execute(deps.as_mut(), mock_env(), info.clone(), msg).unwrap();
@@ -178,7 +168,7 @@ fn workflow(){
             backer_wallet: String::from("community1"),
             otherchain: "ethereum".to_string(),
             otherchain_wallet: "ether_wallet".to_string(),
-            fundraising_stage: "presale".to_string(),
+            fundraising_stage: Uint128::from(1u128),
             token_amount: Uint128::new(10)
         };
         let res = execute(deps.as_mut(), mock_env(), info.clone(), msg).unwrap();
