@@ -26,7 +26,7 @@ pub fn mock_dependencies(
         api: MockApi::default(),
         storage: MockStorage::default(),
         querier: custom_querier,
-        custom_query_type: PhantomData
+        // custom_query_type: PhantomData
     }
 }
 

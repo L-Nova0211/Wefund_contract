@@ -13,9 +13,12 @@ pub enum ContractError {
     #[error("There is no pending tokens")]
     NoPendingTokens {},
 
-    #[error("There is no enough tokens")]
-    NotEnoughBalance {},
+    #[error("There is no enough tokens: {:?}", balance)]
+    NotEnoughBalance {balance: Uint128},
 
+    #[error("Staking error: {:?}", msg)]
+    StakingError {msg: String},
+    
     #[error("Not correct Milestone status : {aust_balance} {estimate_exchange_rate} {epoch_exchange_rate} {withdraw_amount} {release_amount}")]
     Testing{
         aust_balance: String,

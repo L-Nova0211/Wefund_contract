@@ -48,6 +48,7 @@ pub fn instantiate(
     };
     START_TIME.save(deps.storage, &start_time)?;
 
+    CARD_INFOS.save(deps.storage, &Vec::new())?;
     PLATIUM_CARD_NUMBER.save(deps.storage, &Uint128::zero())?;
     GOLD_CARD_NUMBER.save(deps.storage, &Uint128::zero())?;
     SILVER_CARD_NUMBER.save(deps.storage, &Uint128::zero())?;
@@ -170,14 +171,14 @@ pub fn try_withdraw(
 {
     let mut user_info = USER_INFOS.load(deps.storage, wallet.clone())?;
     if user_info.amount < amount {
-        return Err(ContractError::NotEnoughBalance {  });
+        return Err(ContractError::NotEnoughBalance { balance: amount });
     }
     update_userinfo(deps.storage, env.clone(), wallet.clone())?;
 
     let token = REWARD_TOKEN.load(deps.storage)?;
     let balance = get_token_balance(&deps.querier, token.clone(), env.contract.address)?;
     if balance < amount {
-        return Err(ContractError::NotEnoughBalance {  });
+        return Err(ContractError::NotEnoughBalance { balance });
     }
 
     user_info.amount -= amount;
@@ -224,7 +225,7 @@ pub fn try_claimrewards(
     let balance = get_token_balance(&deps.querier, token.clone(), env.contract.address)?;
 
     if balance < user_info.reward_amount {
-        return Err(ContractError::NotEnoughBalance {  });
+        return Err(ContractError::NotEnoughBalance { balance });
     }
 
     let msg = WasmMsg::Execute { 

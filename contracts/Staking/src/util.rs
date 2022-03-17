@@ -1,6 +1,6 @@
 use crate::error::ContractError;
 
-use cosmwasm_std::{ Storage, Uint128, Addr, StdResult, StdError, Response, Env, QuerierWrapper, Querier};
+use cosmwasm_std::{ Storage, Uint128, Addr, StdResult, StdError, Response, Env, QuerierWrapper, Querier, BalanceResponse};
 use cw20::{Cw20ExecuteMsg, Cw20QueryMsg, BalanceResponse as Cw20BalanceResponse, TokenInfoResponse};
 
 use crate::state::{ OWNER, PLATIUM_CARD_NUMBER, GOLD_CARD_NUMBER, SILVER_CARD_NUMBER,
@@ -170,11 +170,11 @@ pub fn get_token_balance(
 )
     ->StdResult<Uint128>
 {
-    let balance = querier.query_wasm_smart(
+    let res: Cw20BalanceResponse = querier.query_wasm_smart(
         token, 
     &Cw20QueryMsg::Balance { 
             address: wallet.to_string() 
         }
     )?;
-    Ok(balance)
+    Ok(res.balance)
 }
